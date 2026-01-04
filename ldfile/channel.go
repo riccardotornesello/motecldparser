@@ -1,5 +1,14 @@
 package ldfile
 
+// LdFileChannelMeta represents the metadata structure for a single channel.
+//
+// This structure defines the binary layout of channel metadata, including
+// pointers to adjacent channel metadata, data location and size, channel
+// properties (frequency, scaling), and descriptive information (name, unit).
+//
+// Channels are stored in a linked list structure, with PreviousMetaPointer
+// and NextMetaPointer forming the links. The last channel has NextMetaPointer
+// set to 0, and the first channel has PreviousMetaPointer set to 0.
 type LdFileChannelMeta struct {
 	PreviousMetaPointer uint32
 	NextMetaPointer     uint32

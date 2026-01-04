@@ -1,3 +1,23 @@
+// Package motec_ld_parser provides functionality for writing MoTeC LD (Logged Data) files.
+//
+// MoTeC LD files are binary files used by MoTeC data acquisition systems to store
+// telemetry data from racing vehicles. This package supports creating and writing
+// LD files with multiple channels of different data types (float32, int16, int32).
+//
+// Basic usage:
+//
+//	file := motec_ld_parser.File{
+//	    Time:    time.Now(),
+//	    Driver:  "Driver Name",
+//	    Vehicle: "Vehicle Name",
+//	}
+//	channel := &motec_ld_parser.Channel[float32]{
+//	    Frequency: 100,
+//	    Name:      "Speed",
+//	    Data:      &[]float32{0, 10, 20},
+//	}
+//	file.AddChannels(channel)
+//	file.Write(fileDescriptor)
 package motec_ld_parser
 
 import (
@@ -27,33 +47,91 @@ import (
 	|---------------|
 */
 
+// File represents a MoTeC LD file containing telemetry data and metadata.
+//
+// The File structure holds all the information needed to create a complete MoTeC LD file,
+// including session metadata (time, driver, venue), event details, vehicle information,
+// and a collection of data channels.
+//
+// All string fields are limited in length when written to the binary file format:
+//   - Driver, Vehicle, Venue: max 64 bytes
+//   - ShortComment: max 64 bytes
+//   - EventName, EventSession: max 64 bytes
+//   - EventComment: max 1024 bytes
+//   - VehicleId: max 64 bytes
+//   - VehicleType, VehicleComment: max 32 bytes
 type File struct {
-	Time         time.Time
-	Driver       string
-	Vehicle      string
-	Venue        string
-	ShortComment string
+	Time         time.Time // Timestamp of when the data was logged
+	Driver       string    // Name of the driver
+	Vehicle      string    // Vehicle identifier or name
+	Venue        string    // Track or venue name
+	ShortComment string    // Brief description or notes
 
-	EventName    string
-	EventSession string
-	EventComment string
+	EventName    string // Name of the event (e.g., "Grand Prix")
+	EventSession string // Session identifier (e.g., "Q1", "Race", "Practice")
+	EventComment string // Detailed event description or notes
 
-	VehicleId      string
-	VehicleWeight  uint32
-	VehicleType    string
-	VehicleComment string
+	VehicleId      string // Unique vehicle identifier
+	VehicleWeight  uint32 // Vehicle weight in kilograms
+	VehicleType    string // Vehicle type or class (e.g., "GT3", "Formula")
+	VehicleComment string // Additional vehicle notes
 
-	Channels []interface{}
+	Channels []interface{} // Collection of Channel pointers (use AddChannels to add)
 }
 
+// Channel represents a single data channel in a MoTeC LD file.
+//
+// A channel contains a series of measurements sampled at a specific frequency.
+// The type parameter T specifies the data type and must be one of:
+//   - float32: for floating-point values (speed, temperature, etc.)
+//   - int16: for 16-bit integer values
+//   - int32: for 32-bit integer values
+//
+// String field limits when written to the binary file:
+//   - Name: max 32 bytes
+//   - ShortName: max 8 bytes
+//   - Unit: max 12 bytes
+//
+// Example:
+//
+//	speedChannel := &Channel[float32]{
+//	    Frequency: 100,      // 100 Hz sampling rate
+//	    Name:      "Speed",
+//	    ShortName: "SPD",
+//	    Unit:      "km/h",
+//	    Data:      &[]float32{0.0, 10.5, 25.3},
+//	}
 type Channel[T float32 | int16 | int32] struct {
-	Frequency uint16
-	Name      string
-	ShortName string
-	Unit      string
-	Data      *[]T
+	Frequency uint16 // Sampling frequency in Hz
+	Name      string // Full channel name
+	ShortName string // Abbreviated name (displayed in compact views)
+	Unit      string // Unit of measurement (e.g., "km/h", "rpm", "°C")
+	Data      *[]T   // Pointer to the data array
 }
 
+// Write writes the complete MoTeC LD file to the provided file descriptor.
+//
+// This method serializes all file metadata, event information, vehicle details,
+// and channel data into the MoTeC LD binary format and writes it to the file.
+// The file must be opened for writing before calling this method.
+//
+// The method handles:
+//   - Computing all internal pointers for the binary structure
+//   - Writing the file header with session metadata
+//   - Writing event, venue, and vehicle information blocks
+//   - Writing channel metadata and data for all channels
+//
+// Example:
+//
+//	fd, err := os.Create("telemetry.ld")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	defer fd.Close()
+//	file.Write(fd)
+//
+// Note: This method does not return an error. Any write errors will cause a panic.
+// Consider wrapping file operations in appropriate error handling.
 func (f *File) Write(fd *os.File) {
 	// Calculate pointers
 	headerSize := uintptr(binary.Size(ldfile.LdFileHead{}))
@@ -150,10 +228,36 @@ func (f *File) Write(fd *os.File) {
 	}
 }
 
+// AddChannels adds one or more channels to the file.
+//
+// Channels must be pointers to Channel instances with appropriate type parameters.
+// Multiple channels can be added in a single call.
+//
+// Example:
+//
+//	speedChannel := &Channel[float32]{...}
+//	rpmChannel := &Channel[int16]{...}
+//	file.AddChannels(speedChannel, rpmChannel)
 func (f *File) AddChannels(channels ...interface{}) {
 	f.Channels = append(f.Channels, channels...)
 }
 
+// Write writes a single channel's metadata and data to the file.
+//
+// This method is called internally by File.Write for each channel.
+// It serializes the channel's metadata (name, unit, frequency, etc.) and
+// binary data to the appropriate locations in the file.
+//
+// Parameters:
+//   - fd: the file descriptor to write to
+//   - n: the channel index (0-based)
+//   - channelsCount: total number of channels in the file
+//   - channelsMetaPointer: file offset where channel metadata begins
+//   - currentDataPointer: file offset where this channel's data should be written
+//
+// Returns the file offset for the next channel's data.
+//
+// This method should not typically be called directly by users.
 func (c *Channel[T]) Write(
 	fd *os.File,
 	n uint16,
@@ -223,6 +327,20 @@ func (c *Channel[T]) Write(
 	return nextDataPointer
 }
 
+// AddData appends a single data point to the channel.
+//
+// This is a convenience method for adding data incrementally rather than
+// providing all data at once.
+//
+// Example:
+//
+//	channel := &Channel[float32]{
+//	    Name: "Temperature",
+//	    Data: &[]float32{},
+//	}
+//	channel.AddData(20.5)
+//	channel.AddData(21.3)
+//	channel.AddData(22.1)
 func (c *Channel[T]) AddData(data T) {
 	*c.Data = append(*c.Data, data)
 }

@@ -1,5 +1,18 @@
+// Package ldfile defines the binary structures for MoTeC LD file format.
+//
+// This package contains the low-level data structures that represent the binary
+// layout of MoTeC LD files. These structures are used internally by the main
+// package to serialize data into the correct format.
 package ldfile
 
+// LdFileHead represents the header structure of a MoTeC LD file.
+//
+// This structure defines the binary layout of the file header, which includes
+// pointers to other sections of the file, device information, session metadata,
+// and channel count. All multi-byte fields use little-endian byte order.
+//
+// The header contains several unknown fields that are required for compatibility
+// with MoTeC software but whose exact purpose is not documented.
 type LdFileHead struct {
 	LDMarker            uint32 // 0x40
 	_                   [4]byte
